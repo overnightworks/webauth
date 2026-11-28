@@ -90,30 +90,34 @@ host configures them; `WebAuthConfig` carries none.
 
 ## The composition call
 
-`WebAuth.build(settings, stores=, groups=, pages=, front=, gate=, outside=, inside=, issuer_calls=)` runs before the host's routes and `auth.install(app, bearer=)` after the last one; `auth.relying_party`, `auth.config` and `auth.admission` serve the host's routes. The readers `current_user`, `admin_user` and `authenticate_websocket` are module functions in `webauth.dependencies` over the installed handle. The host fills `WebAuthSettings` from its environment; webauth reads none. `front` is the `TrustedProxies` the client-address writer believes, or `ServedBehind.SHARED_FRONT` for an app a `web_auth_front` serves (PROXY-07), and `outside` and `inside` are tuples of Starlette `Middleware`, outermost first.
+`WebAuth.build(settings, oidc=, stores=, front=, gate=, outside=, inside=)` runs before the host's routes and `auth.install(app, bearer=)` after the last one; `auth.relying_party`, `auth.config` and `auth.admission` serve the host's routes. `oidc` has no default: an `OidcSignIn`, the host's OpenID Connect settings (`client`, `sign_in_paths`, `keeps_id_token`, `groups`, `pages` and `issuer_calls`, `None` for the HTTPS calls), or `None` for an app the operator ruled off the provider (see "A session after the host's own proof"). The readers `current_user`, `admin_user` and `authenticate_websocket` are module functions in `webauth.dependencies` over the installed handle. The host fills `WebAuthSettings` from its environment; webauth reads none. `front` is the `TrustedProxies` the client-address writer believes, or `ServedBehind.SHARED_FRONT` for an app a `web_auth_front` serves (PROXY-07), and `outside` and `inside` are tuples of Starlette `Middleware`, outermost first.
 
-The operator ruled the form of the call as this paragraph states it (option A: build, then install), COMPOSE-05, COMPOSE-06, COMPOSE-08, COMPOSE-12, COMPOSE-14, COMPOSE-15, COMPOSE-16 and COMPOSE-17; no other sentence of this section is ruled.
+The operator ruled the form of the call (build, then install), COMPOSE-05, COMPOSE-06, COMPOSE-08, COMPOSE-12, COMPOSE-14, COMPOSE-15, COMPOSE-16 and COMPOSE-17, and that the OpenID Connect settings are one optional block, without which the build makes no relying party and the install mounts no sign-in route; no other sentence of this section is ruled.
 
 - COMPOSE-01: With `front=TrustedProxies`, the install places logline's `RequestLineMiddleware` outermost and the client-address writer for `front` immediately inside it; with `SHARED_FRONT` it places neither (PROXY-07). A request the stack refuses (the 400 for a path, the CSRF 403, the 429) writes exactly one request line whose `ip` is the forwarded client, and carries the security headers.
 - COMPOSE-02: The `outside` entries sit between the writer and the library stack. A request an `outside` layer answers itself, such as a CORS preflight, writes one line with the forwarded `ip` and never reaches the stack.
 - COMPOSE-03: The `inside` entries sit inside the stack, so they see only admitted requests, and a `ContextVar` they set is visible to an `outside` layer after the call returns (STACK-04).
 - COMPOSE-04: A WebSocket handshake through the proxy with a live session writes one line with the forwarded `ip` and the person as `sub`.
-- COMPOSE-05: The install registers the start, callback, logout and back-channel logout routes of `settings.sign_in_paths` with the policies SIGNIN-03 to SIGNIN-08 derive.
-- COMPOSE-06: `build` and `install` read no environment and make no outbound call. The relying party reaches the issuer through `issuer_calls` (default: the HTTPS ones), and the clock through `settings.config.wall_clock`.
-- COMPOSE-07: `pages` is the host's: its `refused` answers a callback that ended without a session, its `logout_page_text` gives the logout page its words and language, and its `ui_language` is sent to the issuer as `ui_locales`. `logout_page_text` is `None` exactly when `sign_in_paths.logout` is.
+- COMPOSE-05: With `oidc`, the install registers the start, callback, logout and back-channel logout routes of `oidc.sign_in_paths` with the policies SIGNIN-03 to SIGNIN-08 derive.
+- COMPOSE-06: `build` and `install` read no environment and make no outbound call. The relying party reaches the issuer through `oidc.issuer_calls` (default: the HTTPS ones), and the clock through `settings.config.wall_clock`.
+- COMPOSE-07: `oidc.pages` is the host's: its `refused` answers a callback that ended without a session, its `logout_page_text` gives the logout page its words and language, and its `ui_language` is sent to the issuer as `ui_locales`. `logout_page_text` is `None` exactly when `oidc.sign_in_paths.logout` is.
 - COMPOSE-08: `current_user` opens and closes exactly one `stores.sessions()` entry. The session renewal is durable when the entry's exit returns, before the endpoint runs; a failing exit means no endpoint runs, and an endpoint that fails afterwards keeps the renewal. A stream's entry is closed before its first byte. A direct call `current_user(request)` does the same and bypasses `dependency_overrides`.
-- COMPOSE-09: `groups` decides who is admitted and who is admin: a member passes `current_user`, a non-member is refused with `RefusalPage.NO_ACCESS`, and only an admin passes `admin_user`.
+- COMPOSE-09: `oidc.groups` decides who is admitted and who is admin: a member passes `current_user`, a non-member is refused with `RefusalPage.NO_ACCESS`, and only an admin passes `admin_user`.
 - COMPOSE-10: The host's `outside` and `inside` entries keep the order given, outermost first.
 - COMPOSE-11: A `bearer` given to `install` after the last route has its resource-metadata route served and its public rule added to `gate.public`, and a token on a person path is admitted. The routes the install adds, the sign-in routes of COMPOSE-05 and the resource metadata, answer ahead of every route the host registered before, a catch-all included.
-- COMPOSE-12: Every check webauth owns raises a `ValueError` subclass naming the field, never the value, at `build` for the early values (a `WebAuthSettingError`): `groups.bound_issuer` differing from `settings.client.issuer`, `settings.max_sessions`, `settings.keeps_id_token`, `pages.logout_page_text`, `front` (that is no `TrustedProxies` and no `ServedBehind`), `outside` and `inside`.
+- COMPOSE-12: Every check webauth owns raises a `ValueError` subclass naming the field, never the value, at `build` for the early values (a `WebAuthSettingError`): `oidc` (neither an `OidcSignIn` nor `None`), `oidc.groups.bound_issuer` differing from `oidc.client.issuer`, `oidc.keeps_id_token`, `oidc.pages.logout_page_text`, `settings.max_sessions`, `front` (that is no `TrustedProxies` and no `ServedBehind`), `outside` and `inside`.
 - COMPOSE-13: A second `install` of one handle, on the same app or on another, or an app that already carries the stack of another handle, raises `RuntimeError` and leaves the app's routes, middleware and state as they were. Each app of a shared front is built and installed once. The handle's own flag cannot see a second handle on the app, so the check for another handle's stack stays; no host can name the stack classes or the client-address writer, so no check looks for one added by hand.
-- COMPOSE-14: Every check webauth owns raises a `ValueError` subclass naming the field, never the value, at `install` for the late bearer, before `install` changes the app: a `bearer` with machine paths for `groups` whose `admin_group` is `NoAdmins` (no token could pass there) raises a `WebAuthSettingError` naming `bearer.machine_paths`. `BearerGate` refuses a gate that names no kind when it is constructed.
+- COMPOSE-14: Every check webauth owns raises a `ValueError` subclass naming the field, never the value, at `install` for the late bearer, before `install` changes the app: a `bearer` with machine paths for `oidc.groups` whose `admin_group` is `NoAdmins` (no token could pass there) raises a `WebAuthSettingError` naming `bearer.machine_paths`. `BearerGate` refuses a gate that names no kind when it is constructed.
 - COMPOSE-15: `admin_user` opens no entry and checks the identity it is given, so `app.dependency_overrides[current_user]` decides both.
 - COMPOSE-16: `authenticate_websocket(connection)` refuses a missing or foreign `Origin` before it opens any `stores.sessions()` entry (CSRF-15), then opens one.
 - COMPOSE-17: A host that builds and never installs gets a `RuntimeError` naming the missing `auth.install` on its first request that reads it (`current_user`, `admin_user`, or `authenticate_websocket`), an HTTP request or a WebSocket handshake. A request that reads none of them is served without the library's stack, and the sign-in routes do not exist.
 - COMPOSE-18: `WebAuth.build` is the only way to make a `WebAuth`: calling the class raises `TypeError`.
-- COMPOSE-19: The host passes each transaction once, in `stores`, and the call binds it: the session gate and `current_user` enter `stores.sessions`, the sign-in routes, the person paths and the protected resource enter `stores.sign_in`, and the bearer gate verifies with `auth.relying_party` and decides roles by `groups`. `SessionGate`, `PersonPaths`, `ProtectedResource` and `BearerGate` carry no transaction, relying party or admission of their own.
+- COMPOSE-19: The host passes each transaction once, in `stores`, and the call binds it: the session gate and `current_user` enter `stores.sessions`, the sign-in routes, the person paths and the protected resource enter `stores.sign_in`, and the bearer gate verifies with `auth.relying_party` and decides roles by `oidc.groups`. `SessionGate`, `PersonPaths`, `ProtectedResource` and `BearerGate` carry no transaction, relying party or admission of their own.
 - **Host duty:** `stores.sessions` and `stores.sign_in` address the same session data.
+- COMPOSE-20: `oidc` is a required keyword with no default, so a build that forgets it raises `TypeError`. A build with `oidc=None` constructs no relying party: `auth.relying_party` and `auth.admission` raise `RuntimeError` naming `oidc`.
+- COMPOSE-21: The install of such a handle registers no route and derives no rule: the routes are the host's own, and the session gate's public rules, the rate-limit rules and exemptions, the body-size rules, the CSRF exemptions and the cache-control rules are exactly the host's, so a path that is a sign-in path elsewhere is gated like any other. The stack and the readers behave as with OpenID Connect: security headers, path refusal, body size, rate limit, store outage, CSRF origin rule and session gate, and `current_user`, `admin_user` and `authenticate_websocket` over the installed handle. `admin_user` passes the stored role `admin`, which only the host writes.
+- COMPOSE-22: The install of such a handle refuses a `bearer` before the app changes, with a `WebAuthSettingError` naming `bearer`: a bearer gate verifies with the relying party.
+- **Host duty:** a host without OpenID Connect names its own public paths and its `LoginRedirect` in `gate`, and gives its proof routes their own `RateLimitRule`; the reserved `sign-in` budget stays unused.
 
 ## What every app gets
 
@@ -434,7 +438,7 @@ token. It calls them with the access token Keycloak issued it in `Authorization:
 `auth.install(app, bearer=...)`; it holds `MachinePaths(paths, authorized_parties)`: the paths
 (`PathRules`) and `AuthorizedParties`, the `azp` values (hal's client ids) the host admits on
 them, read from configuration. The install verifies tokens with the handle's relying party and
-decides the admin role by the handle's `groups` (COMPOSE-19).
+decides the admin role by the handle's `oidc.groups` (COMPOSE-19).
 
 - MACHINE-01: A route reads the admitted caller with `Depends(bearer_caller)`;
   `BearerCaller.subject` is the token's `sub`.
@@ -1045,7 +1049,7 @@ No sentence of this section is ruled by the operator.
 - DISCOVERY-11: An `issuer` that `OidcClientConfig` refuses (not an https URL, or with a query or fragment) raises that same `ValueError` naming `issuer`, before any fetch and without repeating the value.
 - DISCOVERY-12: The document's `authorization_response_iss_parameter_supported` (RFC 9207 section 2.3) becomes the field of the same name: `true` and `false` as given, a missing member `False`; any other value raises `OidcDiscoveryError` naming the member.
 - DISCOVERY-13: When `authorization_response_iss_parameter_supported` is `True`, the sign-in callback refuses a response without `iss` as `ISSUER_MISMATCH` (RFC 9207 section 2.4), an error response included, and exchanges no code; an `iss` that differs from `issuer` is `ISSUER_MISMATCH` whatever the field says. The callback's other checks keep their order: state, the pending login's age, then `iss`, then the IdP's `error`.
-- **Host duty:** the host calls it once at startup, passes the result as `WebAuthSettings.client`, and fails to start when it raises. It cannot start while its issuer is down, and a changed document takes effect at the next start; the host's supervisor restarts it.
+- **Host duty:** the host calls it once at startup, passes the result as `OidcSignIn.client`, and fails to start when it raises. It cannot start while its issuer is down, and a changed document takes effect at the next start; the host's supervisor restarts it.
 - **Host duty:** `issuer` is the host's own configuration, never a value from a request: the document decides where the client secret, the code and the PKCE verifier are sent, and the library trusts it as it trusts what the issuer signs.
 - **Host duty:** a host's test passes its own `fetch_provider_metadata` that answers the document, beside HOSTTEST-04.
 
@@ -1053,9 +1057,9 @@ No sentence of this section is ruled by the operator.
 
 The operator ruled the host duty that a single-page app logs out by a top-level form POST; SIGNIN-58; the host duty that a host serving no logout route passes `False`; SIGNIN-60; SIGNIN-61; no other sentence of this section is ruled.
 
-The routes `auth.install` registers (COMPOSE-05) all read the one `auth.relying_party`, which `WebAuth.build` makes once.
+The routes `auth.install` registers (COMPOSE-05) all read the one `auth.relying_party`, which `WebAuth.build` makes once from the host's `OidcSignIn`.
 
-`auth.install` takes the host's `settings.sign_in_paths` and applies the policies for exactly those paths:
+`auth.install` takes the host's `oidc.sign_in_paths` and applies the policies for exactly those paths:
 
 - SIGNIN-03: the session gate's public rules, when a session gate is installed (`GET` of start and callback, `POST` of logout and of the back-channel);
 - SIGNIN-04: the sign-in rate budget on start, callback and logout;
@@ -1068,7 +1072,7 @@ The routes `auth.install` registers (COMPOSE-05) all read the one `auth.relying_
 So the host lists the paths once. `login_redirect` is browser-absolute, so it is right for an app at its origin's root.
 
 - **Host duty:** a host below a `root_path` builds its own `LoginRedirect`.
-- SIGNIN-64: `sign_in_paths` is a required field of `WebAuthSettings`; without it the settings raise `TypeError`.
+- SIGNIN-64: `sign_in_paths` is a required field of `OidcSignIn`; without it the block raises `TypeError`.
 - SIGNIN-65: The derived rules come ahead of the host's own in every policy, so the first match is the derived one (a host exemption wins: SIGNIN-69).
 - SIGNIN-66: The sign-in budget is `RateLimitPolicy.sign_in`, 40 requests per 600 seconds per address unless the host's policy sets another, and it is the first rate rule.
 - SIGNIN-67: The name of the `sign_in` budget (`"sign-in"` unless the host renames it) is reserved: a `RateLimitPolicy` whose default or rule carries it raises `ValueError` naming it when it is built.
@@ -1167,13 +1171,36 @@ The back-channel route is open to anyone who can reach it, and the token is its 
 - **Host duty:** the host lets the issuer reach it over an internal network alone, never the public route
   (tunnel, CDN, access proxy); its URL may name the public hostname through an internal alias.
 
-- SIGNIN-58: `WebAuthSettings` requires the host's explicit `keeps_id_token` choice, with no
+- SIGNIN-58: `OidcSignIn` requires the host's explicit `keeps_id_token` choice, with no
   default.
 - **Host duty:** a host that serves no logout route passes `False`.
 - SIGNIN-60: With `False`, its session row keeps no ID token, while refresh-token storage is unchanged.
 - SIGNIN-61: With `True`, the row keeps the login's ID token for logout.
 - SIGNIN-62: Renewal and refresh-token rotation preserve the original token of a row that keeps it,
 - SIGNIN-63: and the choice of a row that keeps none.
+
+## A session after the host's own proof
+
+For an app the operator ruled off the OpenID Connect provider: the host builds with `oidc=None` (COMPOSE-20 to COMPOSE-22), checks who someone is itself, and then `webauth.sessions.open_session(request, response, account_id) -> str` gives the account its session and `end_session(request, response) -> str | None` ends it. webauth runs no proof and holds no device binding: no passkey code, no challenge, no credential port, no slot for a host value on the session. The account must exist in the host's store: `open_session` provisions none and checks none, and the store's `create` raises for a missing account.
+
+Both functions are synchronous and enter `stores.sign_in` of the installed handle, so a store outage answers the library's 503 as elsewhere and a handle that was never installed raises as COMPOSE-17 says. The OpenID Connect callback and logout route run the same private bodies, with the callback's account step and tokens inside the same entry.
+
+The operator ruled that webauth offers a public session opener and a public provider-free sign-out for an app he ruled off the provider, sharing one sequence with the OpenID Connect callback so that no second copy exists; the names and every other sentence of this section are not ruled.
+
+- OWNPROOF-01: `open_session` opens a session for the account with a fresh id, which it returns. The session expires one idle period after one wall-clock reading and holds no refresh token, no ID token and no account language. The response carries the session cookie that names that id and `Cache-Control: no-store`, and the request line carries the account as `sub`.
+- OWNPROOF-02: `open_session` ends the session the request's cookie names, whoever it belongs to; a missing, forged, oversized or duplicated cookie ends none.
+- OWNPROOF-03: Under `settings.max_sessions` the account's newest `max_sessions - 1` sessions stay and the new one counts as the last.
+- OWNPROOF-04: A failure in the sign-in entry or at its exit sets no cookie and reaches the host's route; a `StoreUnavailableError` there answers 503.
+- OWNPROOF-05: `end_session` ends the session the request's cookie names in one sign-in entry, clears the session cookie, sets `Cache-Control: no-store` and returns the id the cookie names.
+- OWNPROOF-06: `end_session` returns that id whether or not a row still stood under it, and `None` when the cookie names none (missing, forged, oversized, duplicated), which enters no transaction; the cookie is cleared in both.
+- OWNPROOF-07: A failure in the sign-out's entry or at its exit clears nothing and reaches the host's route.
+- OWNPROOF-08: On a handle built with `oidc`, both functions raise `RuntimeError` naming `oidc` before any store call.
+- **Host duty:** pass the response the route actually returns: FastAPI drops the cookies set on an injected `Response` when the route returns its own.
+- **Host duty:** call both functions from a worker thread or a plain `def` route, never on the event loop (the `SignInTransaction` contract), and outside any transaction the host holds open over the same stores.
+- **Host duty:** call them from a state-changing route that the CSRF origin rule covers (a POST), never from a GET; the method is the route's decision.
+- **Host duty:** the returned ids are credentials: a host that keeps one, for example to close a socket, stores its digest, as the `postgres` extra does.
+- **Host duty:** a socket outlives its session: call `authenticate_websocket` again before protected work on an open socket and close it on a refusal, as that function's contract says. The id `end_session` returns only lets the host close the signed-out socket at once; a session also ends by replacement, by the cap, by expiry and by revocation, none of which returns an id.
+- **Host duty:** what a per-call host keeps when the entry or its exit fails is what SIGNIN-24 to SIGNIN-27 state for the callback.
 
 ## The single-process stores
 
@@ -1238,7 +1265,7 @@ webauth runs the store contract kit against the extra over a real Postgres, the 
 - **Host duty:** a store, or a transaction's entry or exit, raises `webauth.ports.StoreUnavailableError` when it cannot reach its backing store, with a text that names no statement, parameter, id, token or subject, and every other failure stays as it is (STACK-16). No check covers it: a host proves it by stopping its database.
 - **Host duty:** the host builds one `StoreAdapter` in its own fixture, from its `accounts`, `sessions` and `transaction` over its database, and runs every check of `STORE_CHECKS` against it, for example by parametrizing its database test over the tuple. No check covers `SessionTransaction`: the host proves it itself.
 - STORECHECK-01: A check returns when the adapter keeps its duty and raises `AssertionError` when it breaks it, whatever the interpreter's assert setting.
-- STORECHECK-02: A check mints its own random subjects, usernames and session ids and takes its times from itself, so the checks run in parallel against a shared database and the adapter needs no clock. Its session ids have the form sign-in writes (`new_session_id()` in `webauth.oidc_login`, 43 characters), and its subjects are at most 36 characters, the length of a uuid `sub`.
+- STORECHECK-02: A check mints its own random subjects, usernames and session ids and takes its times from itself, so the checks run in parallel against a shared database and the adapter needs no clock. Its session ids have the form sign-in writes (`new_session_id()` in `webauth.sessions`, 43 characters), and its subjects are at most 36 characters, the length of a uuid `sub`.
 - **Host duty:** the host removes the rows the checks leave.
 - STORECHECK-03: The checks prove, per port duty:
   - `create` stores the session under exactly the given id, and `load` finds it.

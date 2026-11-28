@@ -25,9 +25,10 @@ Request boundaries for the changing engineer, from [`middleware`](../src/webauth
 
 ## 2. Building Block View
 
-Module owners in `webauth`: `oidc_login` coordinates the sign-in decision, sessions, logout and fresh tokens.
+Module owners in `webauth`: `oidc_login` coordinates the sign-in decision, logout and fresh tokens; `sessions` owns how a session is opened and ended.
 
-- `web_auth` is the composition call ([host contract](host-contract.md#the-composition-call)): `WebAuth.build` checks the host's settings and builds the relying party, and `install` composes the request line and the client-address writer (only for `front=TrustedProxies`), the host's `outside` and `inside` middleware, the stack and the sign-in routes in one order, and `web_auth_front` puts the request line and the writer around a router of several apps built with `ServedBehind.SHARED_FRONT`; `dependencies` reads the sessions entry the install publishes on the app.
+- `web_auth` is the composition call ([host contract](host-contract.md#the-composition-call)): `WebAuth.build` checks the host's settings and, for a host with an `OidcSignIn`, builds the relying party, and `install` composes the request line and the client-address writer (only for `front=TrustedProxies`), the host's `outside` and `inside` middleware, the stack and, with an `OidcSignIn`, the sign-in routes in one order, and `web_auth_front` puts the request line and the writer around a router of several apps built with `ServedBehind.SHARED_FRONT`; `dependencies` reads the sessions entry the install publishes on the app.
+- `sessions` is the one owner of opening and ending a session: `open_session` and `end_session` serve a host that proves who someone is itself (built with `oidc=None`, [host contract](host-contract.md#a-session-after-the-hosts-own-proof)), and the callback and the logout route of `sign_in_routes` run the same private bodies, so the sequence of replacing, capping, creating and ending exists once. It holds `new_session_id`; no module under it knows a proof.
 - `sign_in_routes` registers the sign-in start, callback, logout and back-channel logout routes and answers failures; `stack._with_sign_in_rules` derives the `SignInPaths` policies.
 - `admission` decides who gets in and as which `AppRole`, from the groups and an `AdmissionConfig`, with no I/O; `_account_provisioning` owns finding, creating, re-roling and re-kinding the account a sign-in or a bearer token names, which `oidc_login` and the bearer gate apply, and services call `app_role`.
 - `config` holds deployment facts and the one record `WebAuth.install` publishes on the app; `policies` selects exemptions, caching, rate limits and admitted `AuthorizedParties`.
@@ -45,7 +46,7 @@ Module owners in `webauth`: `oidc_login` coordinates the sign-in decision, sessi
 
 The host owns users; webauth owns the role names (`AppRole`), writes the group-derived role and authorizes only the admin check.
 The host owns transactions: rollback removes auth writes, per-call persistence keeps them; rate limits count attempts either way.
-The sign-in callback, the logout route and the back-channel logout route each enter one host-owned `SignInTransaction`, serialized against every other entry over the same stores. Session-gate renewal is durable before route execution. The library never commits or issues access/ID tokens.
+The sign-in callback, the logout route and the back-channel logout route, and `open_session` and `end_session`, each enter one host-owned `SignInTransaction`, serialized against every other entry over the same stores. Session-gate renewal is durable before route execution. The library never commits or issues access/ID tokens.
 The host owns its routes except those `auth.install` registers for the sign-in paths; [the library's responses](host-contract.md#signed-out-and-refused) are in the host contract.
 
 ## 3. Runtime View
@@ -75,6 +76,22 @@ sequenceDiagram
         S-->>L: Exit returned (durable)
         L-->>Browser: 303 to the return path + session cookie + pending clearing
     end
+```
+A host built with `oidc=None` runs the last step alone, after its own proof:
+
+```mermaid
+sequenceDiagram
+    actor Browser
+    participant H as Host route<br/>(its own proof)
+    participant X as webauth.<br/>sessions
+    participant S as Host stores<br/>sessions
+    Browser->>H: POST, proof
+    H->>H: Check who it is
+    H->>X: open_session(request, response, account_id)
+    X->>S: One SignInTransaction: replace/prune/create session
+    S-->>X: Exit returned (durable)
+    X-->>H: Session id, cookie and no-store set on the response
+    H-->>Browser: The host's answer + session cookie
 ```
 Successful-login ownership for the changing engineer, from [`oidc_login`](../src/webauth/oidc_login.py), [`oidc`](../src/webauth/oidc/), [`jwt_verification`](../src/webauth/jwt_verification.py), [`cookies`](../src/webauth/cookies.py) and the [host callback](../tests/e2e/oidc/host_app.py).
 
@@ -187,6 +204,8 @@ To report a vulnerability, see [SECURITY.md](../.github/SECURITY.md).
 - Sessions bound to the issuer's `sid`: a back-channel logout ends every session of the person, and other devices sign back in through their own live issuer sessions, so one device's precision buys nothing. It reopens when other devices can no longer sign back in invisibly, or when the logout-before-login residue in [Risks](#8-risks-and-technical-debt) must close.
 - Sender-constrained tokens (DPoP, mTLS): the operator's machine is trusted and the person is locked in the issuer before an erasure, so binding guards a theft the trust model leaves out. It reopens if hal binds its tokens: the library then checks DPoP proofs (RFC 9449) at the resource server, or that binding protects nothing.
 - A local flag that locks an account: disabling a person happens at the issuer, and a flag no one writes after the cutover decides nothing. It reopens when the issuer can no longer disable a person.
+- A relying party built from dummy provider settings for an app without a provider: it would make the library call an issuer nobody runs and mount sign-in routes no one uses. `oidc=None` builds none. It reopens when a second app needs both a provider and its own proof.
+- A passkey or other proof run by webauth for an app ruled off the provider: the library would own a second way to sign in beside the provider, with its own storage duty for the host. The host proves who someone is and webauth gives the session. It reopens when a second app is ruled off the provider and needs the same proof.
 - A fake issuer shipped for hosts' tests: one that mints tokens does not belong in every production install ([Testing a host](host-contract.md#testing-a-host)). It reopens when one can ship apart from the production install. The store contract kit ships ([Constraints](#6-constraints-and-reasons)) because it mints no token and adds no dependency.
 - A CSRF token layer, or reading `Referer`: the token protects only script calls, and every supported browser sends `Origin` and, to an HTTPS app, `Sec-Fetch-Site` on a state-changing request ([CSRF origin](host-contract.md#csrf-origin)). It reopens when a supported browser sends neither on such a request.
 - A constructor that derives the endpoints from Keycloak's path layout (`{issuer}/protocol/openid-connect/...`): it ties the library to one vendor's URL scheme that the issuer's own document already states, and a realm behind a front-end hostname or a path change would break it silently. It reopens when an issuer must be supported that publishes no discovery document.
