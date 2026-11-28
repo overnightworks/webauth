@@ -97,6 +97,9 @@ FAILURES_OF_THE_ENTRY_OR_ITS_EXIT = [
     pytest.param("entry_failure", StoreUnavailableError(), 503, id="an-unreachable-store-at-entry"),
     pytest.param("exit_failure", StoreUnavailableError(), 503, id="an-unreachable-store-at-exit"),
 ]
+THE_FAILURES_WITHOUT_THEIR_STATUS = [
+    pytest.param(*case.values[:2], id=case.id) for case in FAILURES_OF_THE_ENTRY_OR_ITS_EXIT
+]
 
 
 def test_ownproof_01_a_proven_account_gets_a_fresh_session_its_cookie_names_in_one_clock_reading(
@@ -183,7 +186,7 @@ def test_ownproof_03_under_a_cap_the_accounts_newest_sessions_stay_and_the_new_o
 
 
 @pytest.mark.parametrize(("failing", "failure", "status"), FAILURES_OF_THE_ENTRY_OR_ITS_EXIT)
-def test_ownproof_04_a_failure_in_the_entry_or_at_its_exit_sets_no_cookie_and_reaches_the_route(
+def test_ownproof_04_a_failure_in_the_entry_or_at_its_exit_reaches_the_route(
     failing: str, failure: Exception, status: int
 ) -> None:
     """OWNPROOF-04"""
@@ -194,13 +197,12 @@ def test_ownproof_04_a_failure_in_the_entry_or_at_its_exit_sets_no_cookie_and_re
     response = _sign_in(host)
 
     assert response.status_code == status
-    assert SESSION_COOKIE_NAME not in set_cookies(response)
     assert world.session_ids == []
 
 
-@pytest.mark.parametrize(("failing", "failure", "_status"), FAILURES_OF_THE_ENTRY_OR_ITS_EXIT)
+@pytest.mark.parametrize(("failing", "failure"), THE_FAILURES_WITHOUT_THEIR_STATUS)
 def test_ownproof_04_the_response_a_host_returns_after_a_failure_carries_no_session_cookie(
-    failing: str, failure: Exception, _status: int
+    failing: str, failure: Exception
 ) -> None:
     """OWNPROOF-04"""
     world = a_host_world(A_MEMBER)
@@ -263,7 +265,7 @@ def test_ownproof_06_the_sign_out_of_a_cookie_that_names_no_session_returns_none
 
 
 @pytest.mark.parametrize(("failing", "failure", "status"), FAILURES_OF_THE_ENTRY_OR_ITS_EXIT)
-def test_ownproof_07_a_failure_in_the_sign_outs_entry_or_exit_clears_nothing_and_reaches_the_route(
+def test_ownproof_07_a_failure_in_the_sign_outs_entry_or_exit_reaches_the_route(
     failing: str, failure: Exception, status: int
 ) -> None:
     """OWNPROOF-07"""
@@ -274,13 +276,12 @@ def test_ownproof_07_a_failure_in_the_sign_outs_entry_or_exit_clears_nothing_and
     response = _sign_out(host, cookie=_the_valid_cookie(world))
 
     assert response.status_code == status
-    assert SESSION_COOKIE_NAME not in set_cookies(response)
     assert world.session_ids == []
 
 
-@pytest.mark.parametrize(("failing", "failure", "_status"), FAILURES_OF_THE_ENTRY_OR_ITS_EXIT)
+@pytest.mark.parametrize(("failing", "failure"), THE_FAILURES_WITHOUT_THEIR_STATUS)
 def test_ownproof_07_the_response_a_host_returns_after_a_failure_clears_no_cookie(
-    failing: str, failure: Exception, _status: int
+    failing: str, failure: Exception
 ) -> None:
     """OWNPROOF-07"""
     world = _world_with_a_stored_session(A_MEMBER)
