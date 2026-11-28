@@ -19,6 +19,7 @@ from webauth.policies import CsrfPolicy, SecurityHeadersPolicy
 from webauth.sign_in_routes import LogoutPageText, SignInPaths
 from webauth.web_auth import (
     IssuerCalls,
+    OidcSignIn,
     SignInPages,
     WebAuth,
     WebAuthSettings,
@@ -113,25 +114,27 @@ def install_the_gated_stack(
     auth = WebAuth.build(
         WebAuthSettings(
             config=config,
-            client=client,
-            sign_in_paths=sign_in_paths,
-            keeps_id_token=keeps_id_token,
             max_sessions=max_sessions,
             security_headers=security_headers,
             csrf_origin=csrf_origin or CsrfPolicy(),
             body_size=body_size,
             rate_limit=rate_limit,
         ),
+        oidc=OidcSignIn(
+            client=client,
+            sign_in_paths=sign_in_paths,
+            keeps_id_token=keeps_id_token,
+            groups=groups or _the_admission_of(client),
+            pages=pages or _the_refusing_pages_of(sign_in_paths),
+            issuer_calls=issuer_calls or an_issuer_nobody_calls(),
+        ),
         stores=WebAuthStores(
             sign_in=sign_in, sessions=sessions or SessionRecordsInMemory(None).in_transaction
         ),
-        groups=groups or _the_admission_of(client),
-        pages=pages or _the_refusing_pages_of(sign_in_paths),
         front=front,
         gate=session_gate,
         outside=tuple(outside),
         inside=tuple(inside),
-        issuer_calls=issuer_calls or an_issuer_nobody_calls(),
     )
     auth.install(app, bearer=None if bearer_of is None else bearer_of(auth))
     return auth

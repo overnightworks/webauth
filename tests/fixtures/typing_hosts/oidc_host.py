@@ -138,6 +138,7 @@ from webauth.sign_in_routes import (
 )
 from webauth.web_auth import (
     IssuerCalls,
+    OidcSignIn,
     ServedBehind,
     SignInPages,
     WebAuth,
@@ -263,17 +264,9 @@ def a_host_refuses_a_sign_in(request: Request, refusal: SignInRefusal) -> Respon
     return Response(status_code=403 if refusal.page is RefusalPage.NO_ACCESS else 400)
 
 
-def a_host_settings(client: OidcClientConfig, config: WebAuthConfig) -> WebAuthSettings:
+def a_host_settings(config: WebAuthConfig) -> WebAuthSettings:
     return WebAuthSettings(
         config=config,
-        client=client,
-        sign_in_paths=SignInPaths(
-            start="/login/oidc",
-            callback="/auth/callback",
-            logout="/logout",
-            backchannel_logout="/auth/backchannel-logout",
-        ),
-        keeps_id_token=True,
         max_sessions=None,
         security_headers=SecurityHeadersPolicy(
             content_security_policy=default_content_security_policy(
@@ -296,15 +289,17 @@ def a_host_settings(client: OidcClientConfig, config: WebAuthConfig) -> WebAuthS
     )
 
 
-def a_host_composes_its_auth(
-    client: OidcClientConfig, config: WebAuthConfig, front: TrustedProxies | ServedBehind
-) -> WebAuth:
-    sign_in: SignInTransaction = a_host_sign_in_transaction
-    sessions: SessionTransaction = a_host_renewal_transaction
+def a_host_signs_in_through_its_issuer(client: OidcClientConfig) -> OidcSignIn:
     key_set_fetch, token_post = a_host_uses_the_production_transports()
-    return WebAuth.build(
-        a_host_settings(client, config),
-        stores=WebAuthStores(sign_in=sign_in, sessions=sessions),
+    return OidcSignIn(
+        client=client,
+        sign_in_paths=SignInPaths(
+            start="/login/oidc",
+            callback="/auth/callback",
+            logout="/logout",
+            backchannel_logout="/auth/backchannel-logout",
+        ),
+        keeps_id_token=True,
         groups=AdmissionConfig(
             bound_issuer=client.issuer,
             login_group=GroupPath("/apps/host"),
@@ -317,6 +312,23 @@ def a_host_composes_its_auth(
             ),
             ui_language=a_host_names_the_language_of_a_request,
         ),
+        issuer_calls=IssuerCalls(
+            post_token_request=token_post,
+            fetch_key_set=key_set_fetch,
+            monotonic_clock=time.monotonic,
+        ),
+    )
+
+
+def a_host_composes_its_auth(
+    client: OidcClientConfig, config: WebAuthConfig, front: TrustedProxies | ServedBehind
+) -> WebAuth:
+    sign_in: SignInTransaction = a_host_sign_in_transaction
+    sessions: SessionTransaction = a_host_renewal_transaction
+    return WebAuth.build(
+        a_host_settings(config),
+        oidc=a_host_signs_in_through_its_issuer(client),
+        stores=WebAuthStores(sign_in=sign_in, sessions=sessions),
         front=front,
         gate=SessionGate(
             login_redirect=LoginRedirect(path="/login", redirect_query_param="next"),
@@ -324,11 +336,6 @@ def a_host_composes_its_auth(
         ),
         outside=(Middleware(a_host_middleware_that_sees_every_request),),
         inside=(Middleware(a_host_middleware_that_sees_admitted_requests),),
-        issuer_calls=IssuerCalls(
-            post_token_request=token_post,
-            fetch_key_set=key_set_fetch,
-            monotonic_clock=time.monotonic,
-        ),
     )
 
 

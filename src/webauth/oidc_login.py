@@ -19,11 +19,11 @@ Admission runs inside the host's ``SignInTransaction`` and never commits: the ho
 exit commits or rolls back, and a refusal writes nothing. Who gets in, and when a
 change of group takes effect, is in ``docs/host-contract.md``, "What every app gets".
 
-After the callback admits an account, one ``SignInTransaction`` ends the session the
-request's cookie names, prunes the account to a cap, and creates its new session,
-holding the login's refresh token and, when the host logs out, its ID token (the browser
-keeps none), at the configured clock's instant, never committing and setting no cookie,
-so the route issues the cookies only after the transaction's exit returned.
+After the callback admits an account, ``webauth.sessions`` runs one ``SignInTransaction`` that
+ends the session the request's cookie names, prunes the account to a cap, and creates its new
+session, holding the login's refresh token and, when the host logs out, its ID token (the browser
+keeps none), at the configured clock's instant, never committing; the cookie is issued only
+after the transaction's exit returned.
 
 The logout route's step ends the session the request's cookie names, if any, in one
 ``SignInTransaction`` entry and answers a page that posts the ID token hint to the issuer's
@@ -53,7 +53,6 @@ module's.
 
 from __future__ import annotations
 
-import secrets
 import urllib.parse
 from dataclasses import dataclass
 from enum import Enum, StrEnum
@@ -67,12 +66,7 @@ from webauth._end_session_page import end_session_page
 from webauth._media_types import media_type_of
 from webauth._paths import same_app_path
 from webauth.cookies import _begin_pending_login, _clear_session_cookies
-from webauth.dependencies import (
-    _is_admitted,
-    _renewed_expiry,
-    _whole_second_now,
-    session_id_from_request,
-)
+from webauth.dependencies import _is_admitted, _whole_second_now
 from webauth.oidc import (
     PENDING_LOGIN_MAX_AGE_SECONDS,
     IdpErrorCode,
@@ -83,8 +77,11 @@ from webauth.ports import (
     AccountEvent,
     AccountEventKind,
 )
+from webauth.sessions import _end_session, _NewSession
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from starlette.requests import Request
     from starlette.responses import Response
 
@@ -104,15 +101,7 @@ __all__ = [
     "AccessTokenRefusalReason",
     "current_groups",
     "fresh_access_token",
-    "new_session_id",
 ]
-
-_SESSION_ID_BYTES: Final = 32
-
-
-def new_session_id() -> str:
-    """The id sign-in gives a new session: 43 URL-safe characters from 32 random bytes."""
-    return secrets.token_urlsafe(_SESSION_ID_BYTES)
 
 
 @dataclass(frozen=True)
@@ -121,14 +110,6 @@ class _AdmittedLogin:
 
     identity: OidcIdentity
     role: str
-
-
-@dataclass(frozen=True)
-class _SignedIn:
-    """What one sign-in wrote: the new session's id and the account it belongs to."""
-
-    session_id: str
-    person_id: str
 
 
 def _start_login(
@@ -174,49 +155,29 @@ def _start_login(
     return authorization.url
 
 
-def _write_sign_in(
-    stores: SignInStores,
-    admitted: _AdmittedLogin,
-    *,
-    config: WebAuthConfig,
-    replaced_session_id: str | None,
-    max_sessions: int | None,
-    keeps_id_token: bool,
-) -> _SignedIn:
-    """The writes of one sign-in, inside the host's ``SignInTransaction``: the account, then
-    the session. Answers the new session's id and the account's, copied before the exit.
+def _name_the_session_of(
+    admitted: _AdmittedLogin, *, keeps_id_token: bool
+) -> Callable[[SignInStores], _NewSession]:
+    """The step the callback runs first inside its sign-in entry: admit the account, then name it
+    with the login's refresh token, its account language and, when ``keeps_id_token`` is true, its
+    ID token. Raises ``UsernameTakenSignal`` before any session is touched."""
 
-    The session is opened at the instant of one ``config.wall_clock`` reading, the same whole
-    second the session decider reads, in this order: the session the request's cookie names
-    (``replaced_session_id``) is ended, whoever it belongs to; when ``max_sessions`` is a number,
-    the account's newest ``max_sessions - 1`` sessions are kept and the rest ended, so neither
-    the replaced session nor the new one counts against the cap; the new session is created,
-    expiring one idle period later, and holds the login's refresh token, its account language
-    and, when ``keeps_id_token`` is true, its ID token. Never commits, takes no lock and sets no
-    cookie. Raises ``UsernameTakenSignal`` before any session is touched.
-    """
-    account = admit_account(
-        admitted.identity,
-        admitted.role,
-        accounts=stores.accounts,
-        audit=stores.audit,
-    )
-    now = _whole_second_now(config)
-    if replaced_session_id is not None:
-        stores.sessions.delete(replaced_session_id)
-    if max_sessions is not None:
-        stores.sessions.prune_overflow(account.id, max_sessions - 1)
-    identity = admitted.identity
-    session = stores.sessions.create(
-        account.id,
-        session_id=new_session_id(),
-        now=now,
-        expires_at=_renewed_expiry(config.session_lifetime, now=now, created_at=now),
-        refresh_token=identity.refresh_token,
-        id_token=SecretStr(identity.id_token) if keeps_id_token else None,
-        account_language=identity.account_language,
-    )
-    return _SignedIn(session_id=session.id, person_id=account.id)
+    def name_the_session(stores: SignInStores) -> _NewSession:
+        account = admit_account(
+            admitted.identity,
+            admitted.role,
+            accounts=stores.accounts,
+            audit=stores.audit,
+        )
+        identity = admitted.identity
+        return _NewSession(
+            account.id,
+            refresh_token=identity.refresh_token,
+            id_token=SecretStr(identity.id_token) if keeps_id_token else None,
+            account_language=identity.account_language,
+        )
+
+    return name_the_session
 
 
 def _log_out(
@@ -234,24 +195,20 @@ def _log_out(
     The row is read and then deleted in one ``transaction`` entry, and only when the cookie names
     a session; the ID token's value is copied inside the block. The answer clears the session
     cookie in every case. Never commits and makes no outbound call."""
-    session_id = session_id_from_request(request, config)
-    id_token: SecretStr | None = None
-    if session_id is not None:
-        with transaction() as stores:
-            id_token = _id_token_of_ended_session(stores.sessions, session_id)
+    _session_id, id_token = _end_session(
+        request, config, transaction, read_the_row=_id_token_of_session
+    )
     form = relying_party._end_session_form(id_token_hint=id_token)
     answer = end_session_page(form, language=language, button_label=button_label)
     _clear_session_cookies(answer, config)
     return answer
 
 
-def _id_token_of_ended_session(sessions: SessionRecordStore, session_id: str) -> SecretStr | None:
+def _id_token_of_session(sessions: SessionRecordStore, session_id: str) -> SecretStr | None:
     record = sessions.load(session_id)
-    id_token = None
-    if record is not None and record.id_token is not None:
-        id_token = SecretStr(record.id_token.get_secret_value())
-    sessions.delete(session_id)
-    return id_token
+    if record is None or record.id_token is None:
+        return None
+    return SecretStr(record.id_token.get_secret_value())
 
 
 class AccessTokenRefusalReason(StrEnum):

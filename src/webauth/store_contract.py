@@ -34,13 +34,13 @@ from typing import TYPE_CHECKING, Final
 from pydantic import SecretStr
 
 from webauth._validation import is_whole_number
-from webauth.oidc_login import new_session_id
 from webauth.ports import (
     AccountKind,
     SessionRecordStore,
     SignInTransaction,
     SubjectUserStore,
 )
+from webauth.sessions import new_session_id
 
 if TYPE_CHECKING:
     from multiprocessing.connection import Connection

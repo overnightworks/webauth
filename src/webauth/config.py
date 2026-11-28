@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from webauth.ports import (
         RateLimitBackend,
         SessionTransaction,
+        SignInTransaction,
         WallClock,
     )
 
@@ -168,21 +169,21 @@ class WebAuthConfig:
         return self.session_secret.get_secret_value().encode()
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class _InstalledWebAuth:
-    """What ``WebAuth.install`` puts on the application: its configuration and sessions."""
+    """What ``WebAuth.install`` puts on the application: its configuration, its sessions entry, its
+    sign-in transaction and the facts the session opener reads."""
 
     config: WebAuthConfig
     sessions: SessionTransaction
+    sign_in: SignInTransaction
+    max_sessions: int | None
+    uses_oidc: bool
 
 
-def _install_web_auth(
-    app: Starlette,
-    config: WebAuthConfig,
-    sessions: SessionTransaction,
-) -> None:
+def _install_web_auth(app: Starlette, installed: _InstalledWebAuth) -> None:
     """Publish the installed record on ``app`` so every request can reach it."""
-    setattr(app.state, _WEB_AUTH_STATE_ATTRIBUTE, _InstalledWebAuth(config, sessions))
+    setattr(app.state, _WEB_AUTH_STATE_ATTRIBUTE, installed)
 
 
 def _installed_web_auth(app: Starlette) -> _InstalledWebAuth:

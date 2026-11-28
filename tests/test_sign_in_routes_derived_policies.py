@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from tests.support.gated_stack_arrangement import install_the_gated_stack
 from tests.support.oidc_arrangement import FakeIssuer, a_key_set_endpoint, a_realm_client_config
 from tests.support.oidc_login_host import (
+    ADMISSION,
     BACKCHANNEL_LOGOUT_MAX_BODY_BYTES,
     BACKCHANNEL_LOGOUT_PATH,
     CALLBACK_PATH,
@@ -25,13 +26,13 @@ from tests.support.oidc_login_host import (
 from tests.support.rate_limit_arrangement import CheckedBudget, RecordingRateLimitBackend
 from tests.support.security_headers_arrangement import A_CONTENT_SECURITY_POLICY
 from tests.support.session_store_arrangement import SessionRecordsInMemory
+from tests.support.web_auth_host_arrangement import a_host_world, an_oidc_sign_in
 from tests.support.webauth_arrangement import HTTPS_TEST_SERVER, a_web_auth_config
 from webauth.middleware import SessionGate
 from webauth.policies import (
     BodySizePolicy,
     BodySizeRule,
     CacheControlRule,
-    CsrfPolicy,
     PathRules,
     RateLimitBudget,
     RateLimitPolicy,
@@ -42,7 +43,7 @@ from webauth.ports import RateLimitBackend
 from webauth.sign_in_routes import (
     SignInPaths,
 )
-from webauth.web_auth import IssuerCalls, WebAuthSettings
+from webauth.web_auth import IssuerCalls, OidcSignIn
 
 FORM_HEADER = {"content-type": SAME_ORIGIN_FORM["content-type"]}
 HEADERS_POLICY = SecurityHeadersPolicy(content_security_policy=A_CONTENT_SECURITY_POLICY)
@@ -111,16 +112,17 @@ def _backchannel_post(host: GatedHost, size: int = 0) -> int:
     return host.client.post(BACKCHANNEL_LOGOUT_PATH, content=body, headers=FORM_HEADER).status_code
 
 
-def test_the_settings_are_refused_without_sign_in_paths() -> None:
-    """SIGNIN-64: the settings of the composition call require `sign_in_paths`."""
+def test_the_oidc_block_is_refused_without_sign_in_paths() -> None:
+    """SIGNIN-64: an `OidcSignIn` requires `sign_in_paths`."""
+    client = a_realm_client_config()
+    pages = an_oidc_sign_in(a_host_world()).pages
+
     with pytest.raises(TypeError, match="sign_in_paths"):
-        WebAuthSettings(  # type: ignore[call-arg]
-            config=a_web_auth_config(),
-            client=a_realm_client_config(),
+        OidcSignIn(  # type: ignore[call-arg]
+            client=client,
             keeps_id_token=True,
-            max_sessions=None,
-            security_headers=HEADERS_POLICY,
-            csrf_origin=CsrfPolicy(),
+            groups=ADMISSION,
+            pages=pages,
         )
 
 

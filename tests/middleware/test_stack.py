@@ -36,8 +36,7 @@ from tests.support.full_stack_arrangement import (
     a_fresh_app,
     install_full_stack,
 )
-from tests.support.gated_stack_arrangement import GATED_SIGN_IN_PATHS, install_the_gated_stack
-from tests.support.oidc_arrangement import a_realm_client_config
+from tests.support.gated_stack_arrangement import install_the_gated_stack
 from tests.support.rate_limit_arrangement import AlwaysFailingRateLimitBackend
 from tests.support.security_headers_arrangement import assert_carries_policy_headers
 from tests.support.session_store_arrangement import SessionRecordsInMemory
@@ -359,9 +358,6 @@ class TestRefusedInstallation:
         with pytest.raises(TypeError, match="csrf_origin"):
             WebAuthSettings(  # type: ignore[call-arg]
                 config=A_CONFIG,
-                client=a_realm_client_config(),
-                sign_in_paths=GATED_SIGN_IN_PATHS,
-                keeps_id_token=False,
                 max_sessions=None,
                 security_headers=HEADERS_POLICY,
             )

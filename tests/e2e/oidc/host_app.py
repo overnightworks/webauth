@@ -97,6 +97,7 @@ from webauth.ports import (
 from webauth.sign_in_routes import LogoutPageText, SignInPaths, SignInRefusal
 from webauth.web_auth import (
     IssuerCalls,
+    OidcSignIn,
     SignInPages,
     WebAuth,
     WebAuthSettings,
@@ -486,6 +487,13 @@ def _web_auth_for(settings: HostSettings, world: World, origin: str) -> WebAuth:
     return WebAuth.build(
         WebAuthSettings(
             config=config,
+            max_sessions=None,
+            security_headers=SecurityHeadersPolicy(default_content_security_policy()),
+            csrf_origin=CsrfPolicy(),
+            body_size=BodySizePolicy(default_max_bytes=DEFAULT_MAX_BODY_BYTES),
+            rate_limit=PROOF_HOST_RATE_LIMIT,
+        ),
+        oidc=OidcSignIn(
             client=client_config(
                 settings,
                 f"{origin}{CALLBACK_PATH}",
@@ -495,29 +503,24 @@ def _web_auth_for(settings: HostSettings, world: World, origin: str) -> WebAuth:
             ),
             sign_in_paths=SIGN_IN_PATHS,
             keeps_id_token=True,
-            max_sessions=None,
-            security_headers=SecurityHeadersPolicy(default_content_security_policy()),
-            csrf_origin=CsrfPolicy(),
-            body_size=BodySizePolicy(default_max_bytes=DEFAULT_MAX_BODY_BYTES),
-            rate_limit=PROOF_HOST_RATE_LIMIT,
+            groups=_admission_of(settings),
+            pages=SignInPages(
+                refused=_remembering_refusal(world),
+                logout_page_text=lambda _request: LOGOUT_PAGE_TEXT,
+                ui_language=lambda _request: None,
+            ),
+            issuer_calls=IssuerCalls(
+                post_token_request=world.token_requests,
+                fetch_key_set=fetch_key_set_over_https,
+                monotonic_clock=time.monotonic,
+            ),
         ),
         stores=WebAuthStores(
             sign_in=_sign_in_transaction(world), sessions=_counted_session_transaction(world)
         ),
-        groups=_admission_of(settings),
-        pages=SignInPages(
-            refused=_remembering_refusal(world),
-            logout_page_text=lambda _request: LOGOUT_PAGE_TEXT,
-            ui_language=lambda _request: None,
-        ),
         front=arrangement.client_address.TRUSTED_PROXIES,
         gate=_gate_of(settings),
         outside=(_counting_callbacks_and_back_channel_answers(settings, world, config),),
-        issuer_calls=IssuerCalls(
-            post_token_request=world.token_requests,
-            fetch_key_set=fetch_key_set_over_https,
-            monotonic_clock=time.monotonic,
-        ),
     )
 
 

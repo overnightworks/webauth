@@ -76,7 +76,6 @@ from typing import TYPE_CHECKING, Final
 
 import anyio.to_thread
 from fastapi import FastAPI, Request  # noqa: TC002  # FastAPI reads the annotation at runtime
-from logline import set_sub
 from starlette.responses import RedirectResponse, Response
 
 from webauth._account_provisioning import UsernameTakenSignal
@@ -84,9 +83,8 @@ from webauth._outage import _session_store_unavailable_answer
 from webauth._paths import same_app_path
 from webauth._sign_in_paths import SignInPaths
 from webauth.admission import AdmissionConfig, AdmissionRefusal
-from webauth.config import WebAuthConfig, web_auth_config
-from webauth.cookies import _take_pending_login, issue_session_cookies
-from webauth.dependencies import session_id_from_request
+from webauth.config import WebAuthConfig, _installed_web_auth, web_auth_config
+from webauth.cookies import _take_pending_login
 from webauth.languages import is_language_tag
 from webauth.oidc import OidcRefusal, OidcRefusalReason
 from webauth.oidc._relying_party import _callback_state
@@ -95,12 +93,12 @@ from webauth.oidc_login import (
     _BackchannelLogoutResult,
     _decide_admission,
     _log_out,
+    _name_the_session_of,
     _receive_backchannel_logout,
-    _SignedIn,
     _start_login,
-    _write_sign_in,
 )
 from webauth.ports import StoreUnavailableError
+from webauth.sessions import _open_session, _SignedIn
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -171,7 +169,6 @@ def _install_sign_in_routes(
     transaction: SignInTransaction,
     refused: Callable[[Request, SignInRefusal], Response],
     keeps_id_token: bool,
-    max_sessions: int | None,
     logout_page_text: Callable[[Request], LogoutPageText] | None,
     ui_language: Callable[[Request], str | None],
 ) -> None:
@@ -209,13 +206,11 @@ def _install_sign_in_routes(
     ``ui_language`` is called once per start request and
     its tag is sent as ``ui_locales``, ``None`` sends none, a non-tag raises ``ValueError``.
     ``keeps_id_token`` has no default: ``True`` stores the ID token as logout hint, ``False`` none.
-    ``max_sessions`` is ``None`` for no cap, otherwise a positive whole number. ``paths.logout`` and
-    ``logout_page_text`` come together: a host without a logout route passes ``None`` for both.
+    ``paths.logout`` and ``logout_page_text`` come together: a host without a logout route passes
+    ``None`` for both.
     ``WebAuth.build`` has refused a value that breaks either.
     """
-    routes = _SignIn(
-        relying_party, admission, transaction, refused, keeps_id_token, max_sessions, ui_language
-    )
+    routes = _SignIn(relying_party, admission, transaction, refused, keeps_id_token, ui_language)
 
     _register_routes(app, paths, routes, logout_page_text)
 
@@ -270,7 +265,6 @@ class _SignIn:
     transaction: SignInTransaction
     refused: Callable[[Request, SignInRefusal], Response]
     keeps_id_token: bool
-    max_sessions: int | None
     ui_language: Callable[[Request], str | None]
 
     def start(self, request: Request, return_to: str | None) -> Response:
@@ -344,35 +338,32 @@ class _SignIn:
         admitted = _decide_admission(identity, admission=self.admission)
         if isinstance(admitted, AdmissionRefusal):
             return self._refuse(request, admitted)
-        replaced_session_id = session_id_from_request(request, config)
-        try:
-            signed_in = self._write(admitted, config, replaced_session_id)
-        except UsernameTakenSignal:
-            return self._refuse(request, AdmissionRefusal.USERNAME_TAKEN)
-        set_sub(request.scope, signed_in.person_id)
-        _LOGGER.info(_COMPLETED_EVENT, extra={"sub": signed_in.person_id})
         answer = RedirectResponse(
             same_app_path(request, pending.return_to) or _app_root(request),
             status_code=303,
         )
-        issue_session_cookies(answer, signed_in.session_id, config)
+        try:
+            signed_in = self._open_the_session_of(request, answer, config, admitted)
+        except UsernameTakenSignal:
+            return self._refuse(request, AdmissionRefusal.USERNAME_TAKEN)
+        _LOGGER.info(_COMPLETED_EVENT, extra={"sub": signed_in.person_id})
         return answer
 
-    def _write(
+    def _open_the_session_of(
         self,
-        admitted: _AdmittedLogin,
+        request: Request,
+        answer: Response,
         config: WebAuthConfig,
-        replaced_session_id: str | None,
+        admitted: _AdmittedLogin,
     ) -> _SignedIn:
-        with self.transaction() as stores:
-            return _write_sign_in(
-                stores,
-                admitted,
-                config=config,
-                replaced_session_id=replaced_session_id,
-                max_sessions=self.max_sessions,
-                keeps_id_token=self.keeps_id_token,
-            )
+        return _open_session(
+            request,
+            answer,
+            config,
+            self.transaction,
+            max_sessions=_installed_web_auth(request.app).max_sessions,
+            name_the_session=_name_the_session_of(admitted, keeps_id_token=self.keeps_id_token),
+        )
 
     def _refuse(self, request: Request, cause: OidcRefusal | AdmissionRefusal) -> Response:
         _LOGGER.info(_REFUSED_EVENT, extra=_refusal_fields(cause))

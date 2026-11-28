@@ -30,6 +30,6 @@ that build and integrate them. One app's need shapes webauth for every app, so e
 
 - No durable storage of its own: each app keeps its accounts, its audit and what else must last in its own database. The `postgres` extra is an optional adapter over the app's own database connection that covers the session half only; the single-process adapters (`webauth.single_process_stores`) keep accounts, sessions and the sign-in transaction in memory for a host that runs one worker and loses them on restart.
 - No deployment of its own: each app chooses the release it runs.
-- No identity provider and no password login: it relies on an OpenID Connect provider to say who someone is.
+- No identity provider and no password login: an OpenID Connect provider says who someone is, or, for an app the operator ruled off the provider, that app's own proof; webauth never runs such a proof.
 - No compatibility layers: a change that breaks its callers breaks cleanly, says so, and leaves nothing of the old form
   behind.

@@ -30,7 +30,7 @@ from webauth.ports import AuthenticatedUser
 from webauth.proxies import TrustedProxies
 from webauth.rate_limit import SingleProcessRateLimitBackend
 from webauth.sign_in_routes import LogoutPageText, SignInPaths
-from webauth.web_auth import SignInPages, WebAuth, WebAuthSettings, WebAuthStores
+from webauth.web_auth import OidcSignIn, SignInPages, WebAuth, WebAuthSettings, WebAuthStores
 
 client = discover_oidc_client_config(
     "https://keycloak.example/realms/notes",
@@ -50,31 +50,33 @@ auth = WebAuth.build(
             allowed_hosts_exact=frozenset({"app.example.com"}),
             session_lifetime=SessionLifetime(idle_seconds=43200, absolute_max_age_seconds=43200),
         ),
-        client=client,
-        sign_in_paths=SignInPaths(
-            start="/login/oidc", callback="/auth/callback", logout="/logout",
-            backchannel_logout="/auth/backchannel-logout",
-        ),
-        keeps_id_token=True,
         max_sessions=None,
         security_headers=SecurityHeadersPolicy(
             content_security_policy=default_content_security_policy(),
         ),
         csrf_origin=CsrfPolicy(),
     ),
+    oidc=OidcSignIn(
+        client=client,
+        sign_in_paths=SignInPaths(
+            start="/login/oidc", callback="/auth/callback", logout="/logout",
+            backchannel_logout="/auth/backchannel-logout",
+        ),
+        keeps_id_token=True,
+        groups=AdmissionConfig(
+            bound_issuer=client.issuer,
+            login_group=GroupPath("/apps/notes"),
+            admin_group=GroupPath("/apps/notes/admin"),
+        ),
+        pages=SignInPages(
+            refused=the_hosts_refusal_page,
+            logout_page_text=lambda _request: LogoutPageText(language="en", button_label="Log out"),
+            ui_language=lambda _request: None,
+        ),
+    ),
     stores=WebAuthStores(
         sign_in=the_hosts_sign_in_transaction,
         sessions=the_hosts_session_transaction,
-    ),
-    groups=AdmissionConfig(
-        bound_issuer=client.issuer,
-        login_group=GroupPath("/apps/notes"),
-        admin_group=GroupPath("/apps/notes/admin"),
-    ),
-    pages=SignInPages(
-        refused=the_hosts_refusal_page,
-        logout_page_text=lambda _request: LogoutPageText(language="en", button_label="Log out"),
-        ui_language=lambda _request: None,
     ),
     front=TrustedProxies.parse("10.0.0.0/8"),
 )
@@ -90,11 +92,13 @@ def me(user: AuthenticatedUser = Depends(current_user)) -> AuthenticatedUser:
 auth.install(app, bearer=None)
 ```
 
-`WebAuth.build` runs before the host's routes, which take `auth.relying_party`, `auth.config` and `auth.admission`; `auth.install(app, bearer=...)` runs after the last route, with the host's `BearerGate` or `None`. The host passes each transaction once, in `stores`: the call binds `stores.sessions` to the session gate and `current_user`, and `stores.sign_in` to the sign-in routes, the person paths and the protected resource, so no gate carries a transaction of its own ([the composition call](docs/host-contract.md#the-composition-call)). Neither reads the environment or calls the issuer. `discover_oidc_client_config` reads the issuer's discovery document once, at startup, and the host does not start when it raises ([the client configuration](docs/host-contract.md#the-client-configuration)). `ui_language` names the person's language to the issuer as `ui_locales`: a host passes `resolve_language`'s answer for the request, or `lambda request: None` to name none ([a person's language](docs/host-contract.md#a-persons-language)). `front` names the proxies whose forwarding headers are believed: `TrustedProxies` makes `install` place logline's request line and webauth's client-address writer, and a host with several apps behind one router builds each with `ServedBehind.SHARED_FRONT` and serves `web_auth_front(Router(...), trusted_proxies=...)`, so the host adds neither by hand ([trusted proxies](docs/host-contract.md#trusted-proxies)). The host's own middleware goes in the `outside` and `inside` slots of `build` ([the composition call](docs/host-contract.md#the-composition-call)).
+`WebAuth.build` runs before the host's routes, which take `auth.relying_party`, `auth.config` and `auth.admission`; its `oidc` keyword is required, an `OidcSignIn` as above or `None`; `auth.install(app, bearer=...)` runs after the last route, with the host's `BearerGate` or `None`. The host passes each transaction once, in `stores`: the call binds `stores.sessions` to the session gate and `current_user`, and `stores.sign_in` to the sign-in routes, the person paths and the protected resource, so no gate carries a transaction of its own ([the composition call](docs/host-contract.md#the-composition-call)). Neither reads the environment or calls the issuer. `discover_oidc_client_config` reads the issuer's discovery document once, at startup, and the host does not start when it raises ([the client configuration](docs/host-contract.md#the-client-configuration)). `ui_language` names the person's language to the issuer as `ui_locales`: a host passes `resolve_language`'s answer for the request, or `lambda request: None` to name none ([a person's language](docs/host-contract.md#a-persons-language)). `front` names the proxies whose forwarding headers are believed: `TrustedProxies` makes `install` place logline's request line and webauth's client-address writer, and a host with several apps behind one router builds each with `ServedBehind.SHARED_FRONT` and serves `web_auth_front(Router(...), trusted_proxies=...)`, so the host adds neither by hand ([trusted proxies](docs/host-contract.md#trusted-proxies)). The host's own middleware goes in the `outside` and `inside` slots of `build` ([the composition call](docs/host-contract.md#the-composition-call)).
 
 A host with one worker and no database keeps its accounts and sessions in memory with `SingleProcessStores(audit=the_hosts_audit_sink)` from `webauth.single_process_stores`: pass its `transaction` as `stores.sign_in` and `lambda: nullcontext(stores.sessions)` as `stores.sessions`. A restart forgets every account and session ([the single-process stores](docs/host-contract.md#the-single-process-stores)).
 
-`install` derives the policies of the sign-in routes from `sign_in_paths` and applies them ahead of the host's own, so the host lists them once; it also applies a rate limit and a body limit when the host passes none. The sign-in routes are in the [host contract](docs/host-contract.md#the-sign-in-routes); [`tests/fixtures/typing_hosts/oidc_host.py`](tests/fixtures/typing_hosts/oidc_host.py)
+An app the operator ruled off the OpenID Connect provider builds with `oidc=None`: no relying party is made and `install` mounts no sign-in route and derives no rule. The host checks who someone is itself and then calls `open_session(request, response, account_id)` and `end_session(request, response)` from `webauth.sessions`, so the session, its cookie, the Origin rule, the WebSocket handshake and the limits per address are webauth's ([a session after the host's own proof](docs/host-contract.md#a-session-after-the-hosts-own-proof)). webauth runs no proof.
+
+`install` derives the policies of the sign-in routes from `oidc.sign_in_paths` and applies them ahead of the host's own, so the host lists them once; it also applies a rate limit and a body limit when the host passes none. The sign-in routes are in the [host contract](docs/host-contract.md#the-sign-in-routes); [`tests/fixtures/typing_hosts/oidc_host.py`](tests/fixtures/typing_hosts/oidc_host.py)
 is a complete host, checked in CI against the built wheel.
 
 ## Documentation
