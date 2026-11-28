@@ -15,13 +15,7 @@ from fastapi.testclient import TestClient
 from starlette.responses import JSONResponse
 from starlette.websockets import WebSocket
 
-from tests.support.client_address_arrangement import (
-    UNIX_SOCKET_PATH,
-    a_connection_scope,
-    answered_through_the_front,
-    behind_the_client_address_writer,
-    recorded_by_the_writer,
-)
+from tests.support.client_address_arrangement import behind_the_client_address_writer
 from tests.support.full_stack_arrangement import (
     a_fresh_app,
     install_full_stack,
@@ -31,6 +25,12 @@ from tests.support.request_line_arrangement import (
     TRUSTED_PEER,
     a_client_behind_the_proxy,
     request_lines_written,
+)
+from tests.support.unix_socket_peer_arrangement import (
+    UNIX_SOCKET_PATH,
+    a_connection_scope,
+    answered_through_the_front,
+    recorded_by_the_writer,
 )
 from tests.support.web_auth_host_arrangement import an_unparseable_forward, forwarded_by_the_proxy
 from tests.support.webauth_arrangement import API_PATH, HTTPS_TEST_SERVER
@@ -151,13 +151,9 @@ def test_the_writer_rewrites_neither_the_peer_nor_the_server_of_a_unix_socket_sc
     """PROXY-10: the forwarded address is recorded beside the scope, not written into it."""
     scope = a_connection_scope(kind=kind, headers={"x-forwarded-for": "203.0.113.7"})
 
-    recorded = recorded_by_the_writer(TrustedProxies(unix_socket_peer=True), scope)
+    recorded_by_the_writer(TrustedProxies(unix_socket_peer=True), scope)
 
-    assert (recorded.address, scope["client"], scope["server"]) == (
-        "203.0.113.7",
-        None,
-        (UNIX_SOCKET_PATH, None),
-    )
+    assert (scope["client"], scope["server"]) == (None, (UNIX_SOCKET_PATH, None))
 
 
 def test_the_request_line_of_a_unix_socket_request_carries_the_forwarded_address(

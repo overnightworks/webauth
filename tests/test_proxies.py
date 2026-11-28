@@ -9,13 +9,13 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
-from tests.support.client_address_arrangement import (
+from tests.support.client_address_arrangement import add_the_client_address_writer
+from tests.support.log_records import fields_of
+from tests.support.unix_socket_peer_arrangement import (
     UNIX_SOCKET_PATH,
     a_connection_scope,
-    add_the_client_address_writer,
     recorded_by_the_writer,
 )
-from tests.support.log_records import fields_of
 from webauth import proxies
 from webauth.proxies import (
     TrustedProxies,
@@ -600,6 +600,7 @@ def test_a_tcp_scope_is_judged_by_the_networks_alone_with_the_flag_on(
     )
 
 
+@_CONNECTION_KINDS
 @pytest.mark.parametrize(
     ("trusted_proxies", "server", "forwarded_proto", "https"),
     [
@@ -612,13 +613,16 @@ def test_a_tcp_scope_is_judged_by_the_networks_alone_with_the_flag_on(
     ],
 )
 def test_a_trusted_unix_socket_peer_is_believed_about_the_scheme(
+    kind: Literal["http", "websocket"],
     trusted_proxies: TrustedProxies,
     server: object,
     forwarded_proto: str,
     https: bool,
 ) -> None:
     """PROXY-10: `X-Forwarded-Proto` counts from a trusted unix-socket peer, as from a TCP one."""
-    scope = a_connection_scope(server=server, headers={"x-forwarded-proto": forwarded_proto})
+    scope = a_connection_scope(
+        kind=kind, server=server, headers={"x-forwarded-proto": forwarded_proto}
+    )
 
     assert recorded_by_the_writer(trusted_proxies, scope).https is https
 
