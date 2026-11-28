@@ -111,85 +111,6 @@ def install_the_gated_stack(
     names the store. `bearer_of` makes the bearer gate from the relying party the call built.
     """
     client = client or a_realm_client_config()
-    return _build_and_install(
-        app,
-        OidcSignIn(
-            client=client,
-            sign_in_paths=sign_in_paths,
-            keeps_id_token=keeps_id_token,
-            groups=groups or _the_admission_of(client),
-            pages=pages or _the_refusing_pages_of(sign_in_paths),
-            issuer_calls=issuer_calls or an_issuer_nobody_calls(),
-        ),
-        config=config,
-        sessions=sessions,
-        sign_in=sign_in,
-        session_gate=session_gate,
-        bearer_of=bearer_of,
-        max_sessions=max_sessions,
-        security_headers=security_headers,
-        csrf_origin=csrf_origin,
-        body_size=body_size,
-        rate_limit=rate_limit,
-        inside=inside,
-        outside=outside,
-        front=front,
-    )
-
-
-def install_the_stack_without_oidc(
-    app: FastAPI,
-    *,
-    config: WebAuthConfig,
-    sessions: SessionTransaction | None = None,
-    session_gate: SessionGate | None = None,
-    sign_in: SignInTransaction = a_sign_in_that_never_runs,
-    max_sessions: int | None = None,
-    security_headers: SecurityHeadersPolicy = GATED_APP_HEADERS_POLICY,
-    csrf_origin: CsrfPolicy | None = None,
-    body_size: BodySizePolicy | None = None,
-    rate_limit: RateLimitPolicy | None = None,
-    front: TrustedProxies | ServedBehind = TRUSTED_PROXIES,
-) -> WebAuth:
-    """Build the app's auth with the composition call and `oidc=None`, and install it on `app`:
-    the stack and the readers, no relying party and no sign-in route."""
-    return _build_and_install(
-        app,
-        None,
-        config=config,
-        sessions=sessions,
-        sign_in=sign_in,
-        session_gate=session_gate,
-        bearer_of=None,
-        max_sessions=max_sessions,
-        security_headers=security_headers,
-        csrf_origin=csrf_origin,
-        body_size=body_size,
-        rate_limit=rate_limit,
-        inside=(),
-        outside=(),
-        front=front,
-    )
-
-
-def _build_and_install(
-    app: FastAPI,
-    oidc: OidcSignIn | None,
-    *,
-    config: WebAuthConfig,
-    sessions: SessionTransaction | None,
-    sign_in: SignInTransaction,
-    session_gate: SessionGate | None,
-    bearer_of: Callable[[WebAuth], BearerGate] | None,
-    max_sessions: int | None,
-    security_headers: SecurityHeadersPolicy,
-    csrf_origin: CsrfPolicy | None,
-    body_size: BodySizePolicy | None,
-    rate_limit: RateLimitPolicy | None,
-    inside: Sequence[Middleware],
-    outside: Sequence[Middleware],
-    front: TrustedProxies | ServedBehind,
-) -> WebAuth:
     auth = WebAuth.build(
         WebAuthSettings(
             config=config,
@@ -199,7 +120,14 @@ def _build_and_install(
             body_size=body_size,
             rate_limit=rate_limit,
         ),
-        oidc=oidc,
+        oidc=OidcSignIn(
+            client=client,
+            sign_in_paths=sign_in_paths,
+            keeps_id_token=keeps_id_token,
+            groups=groups or _the_admission_of(client),
+            pages=pages or _the_refusing_pages_of(sign_in_paths),
+            issuer_calls=issuer_calls or an_issuer_nobody_calls(),
+        ),
         stores=WebAuthStores(
             sign_in=sign_in, sessions=sessions or SessionRecordsInMemory(None).in_transaction
         ),
