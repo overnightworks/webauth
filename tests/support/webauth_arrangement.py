@@ -448,7 +448,7 @@ async def no_receive() -> Message:
 
 
 def an_http_scope(
-    app: FastAPI,
+    app: FastAPI | None = None,
     path: str = "/boom",
     *,
     method: str = "GET",
@@ -456,7 +456,12 @@ def an_http_scope(
     spec_version: str | None = None,
     raw_path: bytes | None = None,
     root_path: str = "",
+    scheme: str = "https",
+    client: tuple[str, int] | None = ("203.0.113.7", 1234),
+    server: object = ("testserver", 443),
 ) -> Scope:
+    """The scope a server hands the app; `client` and `server` take `None` or any form the case
+    needs (a unix socket's server is a path and `None`, and it has no client)."""
     asgi = {"version": "3.0"}
     if spec_version is not None:
         asgi["spec_version"] = spec_version
@@ -465,15 +470,25 @@ def an_http_scope(
         "asgi": asgi,
         "http_version": "1.1",
         "method": method,
-        "scheme": "https",
+        "scheme": scheme,
         "path": path,
         "raw_path": path.encode() if raw_path is None else raw_path,
         "query_string": b"",
         "headers": list(headers),
-        "client": ("203.0.113.7", 1234),
-        "server": ("testserver", 443),
+        "client": client,
+        "server": server,
         "root_path": root_path,
-        "app": app,
+        **({} if app is None else {"app": app}),
+    }
+
+
+def as_a_websocket_scope(scope: Scope) -> Scope:
+    """`scope`, an http one, as the websocket scope of the same connection."""
+    http_only = {"method", "http_version"}
+    return {
+        **{key: value for key, value in scope.items() if key not in http_only},
+        "type": "websocket",
+        "scheme": {"http": "ws", "https": "wss"}[scope["scheme"]],
     }
 
 

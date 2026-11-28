@@ -7,6 +7,7 @@ place the writer in `tests/test_web_auth.py` and `tests/test_web_auth_front.py`.
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
 import pytest
 from fastapi import FastAPI, Request
@@ -14,22 +15,29 @@ from fastapi.testclient import TestClient
 from starlette.responses import JSONResponse
 from starlette.websockets import WebSocket
 
-from tests.support.client_address_arrangement import (
-    behind_the_client_address_writer,
-)
+from tests.support.client_address_arrangement import behind_the_client_address_writer
 from tests.support.full_stack_arrangement import (
     a_fresh_app,
     install_full_stack,
 )
 from tests.support.request_line_arrangement import (
+    FORWARDED_CLIENT,
     TRUSTED_PEER,
     a_client_behind_the_proxy,
+    request_lines_written,
+)
+from tests.support.unix_socket_peer_arrangement import (
+    UNIX_SOCKET_PATH,
+    a_connection_scope,
+    answered_through_the_front,
+    recorded_by_the_writer,
 )
 from tests.support.web_auth_host_arrangement import an_unparseable_forward, forwarded_by_the_proxy
 from tests.support.webauth_arrangement import API_PATH, HTTPS_TEST_SERVER
 from webauth import proxies
 from webauth.middleware.rate_limit import _IpRateLimitMiddleware
 from webauth.policies import PathRules, RateLimitBudget, RateLimitPolicy
+from webauth.proxies import TrustedProxies
 from webauth.web_auth import ServedBehind
 
 SOCKET_PATH = "/ws"
@@ -134,3 +142,27 @@ def test_the_rate_limiter_alone_reads_the_address_before_its_exemption_check() -
 
     with pytest.raises(RuntimeError, match="web_auth_front"):
         client.get("/exempt")
+
+
+@pytest.mark.parametrize("kind", ["http", "websocket"])
+def test_the_writer_rewrites_neither_the_peer_nor_the_server_of_a_unix_socket_scope(
+    kind: Literal["http", "websocket"],
+) -> None:
+    """PROXY-10: the forwarded address is recorded beside the scope, not written into it."""
+    scope = a_connection_scope(kind=kind, headers={"x-forwarded-for": "203.0.113.7"})
+
+    recorded_by_the_writer(TrustedProxies(unix_socket_peer=True), scope)
+
+    assert (scope["client"], scope["server"]) == (None, (UNIX_SOCKET_PATH, None))
+
+
+def test_the_request_line_of_a_unix_socket_request_carries_the_forwarded_address(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """PROXY-10: the `ip` of the request line is the address the proxy forwarded."""
+    scope = a_connection_scope(headers={"x-forwarded-for": FORWARDED_CLIENT})
+
+    with request_lines_written(capsys) as lines:
+        answered_through_the_front(TrustedProxies(unix_socket_peer=True), scope)
+
+    assert [line["ip"] for line in lines] == [FORWARDED_CLIENT]
