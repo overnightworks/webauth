@@ -48,8 +48,8 @@ host configures them; `WebAuthConfig` carries none.
   the socket itself is world-writable (mode `0o666`), so the boundary is its directory, which only
   the app's user and the proxy can enter, or a pre-bound `0600` socket handed to uvicorn with
   `--fd`.
-- **Host duty:** keep uvicorn's `proxy_headers` off on the socket and never set
-  `--forwarded-allow-ips` to `*`, which takes the leftmost entry, the one the client wrote.
+- **Host duty:** keep the server's forwarded-header handling off on the socket too, as above, and
+  never set `--forwarded-allow-ips` to `*`, which takes the leftmost entry, the one the client wrote.
 - **Host duty:** turn the flag on only behind a proxy that sets or appends `X-Forwarded-For` (HTTP
   mode, as `tailscale serve`'s HTTP proxy does), never behind a TCP pass-through
   (`tailscale serve --tcp` or `--tls-terminated-tcp`), where the client writes the header itself.
