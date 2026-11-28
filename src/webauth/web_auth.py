@@ -402,7 +402,6 @@ class WebAuth:
             transaction=sign_in,
             refused=oidc.pages.refused,
             keeps_id_token=oidc.keeps_id_token,
-            max_sessions=self._settings.max_sessions,
             logout_page_text=oidc.pages.logout_page_text,
             ui_language=oidc.pages.ui_language,
         )

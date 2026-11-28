@@ -52,6 +52,7 @@ from tests.support.oidc_login_host import (
     set_cookies,
 )
 from tests.support.session_store_arrangement import SessionRecordsInMemory
+from tests.support.web_auth_host_arrangement import a_host_world, an_oidc_sign_in
 from tests.support.webauth_arrangement import (
     FIXED_INSTANT,
     a_web_auth_config,
@@ -67,12 +68,11 @@ from webauth.cookies import sign_session_id
 from webauth.oidc import IdpErrorCode, OidcIdentity, OidcRefusal, OidcRefusalReason
 from webauth.ports import AccountEventKind, AccountKind
 from webauth.sign_in_routes import (
-    LogoutPageText,
     RefusalPage,
     SignInPaths,
     SignInRefusal,
 )
-from webauth.web_auth import OidcSignIn, SignInPages
+from webauth.web_auth import OidcSignIn
 
 BYSTANDER = FakeUser(id=OTHER_SUBJECT, username="omar")
 BOTH_KINDS = [
@@ -591,11 +591,7 @@ def test_the_oidc_block_is_refused_without_stating_whether_the_host_keeps_the_id
             client=a_realm_client_config(),
             sign_in_paths=SIGN_IN_PATHS,
             groups=ADMISSION,
-            pages=SignInPages(
-                refused=lambda _request, _refusal: Response(status_code=403),
-                logout_page_text=lambda _request: LogoutPageText(language="en", button_label="Out"),
-                ui_language=lambda _request: None,
-            ),
+            pages=an_oidc_sign_in(a_host_world()).pages,
         )
 
 

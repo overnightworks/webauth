@@ -1195,6 +1195,7 @@ The operator ruled that webauth offers a public session opener and a public prov
 - OWNPROOF-06: `end_session` returns that id whether or not a row still stood under it, and `None` when the cookie names none (missing, forged, oversized, duplicated), which enters no transaction; the cookie is cleared in both.
 - OWNPROOF-07: A failure in the sign-out's entry or at its exit clears nothing and reaches the host's route.
 - OWNPROOF-08: On a handle built with `oidc`, both functions raise `RuntimeError` naming `oidc` before any store call.
+- **Host duty:** a `cache_control_rules` entry of the host's `SecurityHeadersPolicy` that matches a proof route replaces the `Cache-Control: no-store` of OWNPROOF-01 and OWNPROOF-05; no rule is derived for those paths.
 - **Host duty:** pass the response the route actually returns: FastAPI drops the cookies set on an injected `Response` when the route returns its own.
 - **Host duty:** call both functions from a worker thread or a plain `def` route, never on the event loop (the `SignInTransaction` contract), and outside any transaction the host holds open over the same stores.
 - **Host duty:** call them from a state-changing route that the CSRF origin rule covers (a POST), never from a GET; the method is the route's decision.

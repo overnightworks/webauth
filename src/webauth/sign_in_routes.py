@@ -83,7 +83,7 @@ from webauth._outage import _session_store_unavailable_answer
 from webauth._paths import same_app_path
 from webauth._sign_in_paths import SignInPaths
 from webauth.admission import AdmissionConfig, AdmissionRefusal
-from webauth.config import WebAuthConfig, web_auth_config
+from webauth.config import WebAuthConfig, _installed_web_auth, web_auth_config
 from webauth.cookies import _take_pending_login
 from webauth.languages import is_language_tag
 from webauth.oidc import OidcRefusal, OidcRefusalReason
@@ -169,7 +169,6 @@ def _install_sign_in_routes(
     transaction: SignInTransaction,
     refused: Callable[[Request, SignInRefusal], Response],
     keeps_id_token: bool,
-    max_sessions: int | None,
     logout_page_text: Callable[[Request], LogoutPageText] | None,
     ui_language: Callable[[Request], str | None],
 ) -> None:
@@ -207,13 +206,11 @@ def _install_sign_in_routes(
     ``ui_language`` is called once per start request and
     its tag is sent as ``ui_locales``, ``None`` sends none, a non-tag raises ``ValueError``.
     ``keeps_id_token`` has no default: ``True`` stores the ID token as logout hint, ``False`` none.
-    ``max_sessions`` is ``None`` for no cap, otherwise a positive whole number. ``paths.logout`` and
-    ``logout_page_text`` come together: a host without a logout route passes ``None`` for both.
+    ``paths.logout`` and ``logout_page_text`` come together: a host without a logout route passes
+    ``None`` for both.
     ``WebAuth.build`` has refused a value that breaks either.
     """
-    routes = _SignIn(
-        relying_party, admission, transaction, refused, keeps_id_token, max_sessions, ui_language
-    )
+    routes = _SignIn(relying_party, admission, transaction, refused, keeps_id_token, ui_language)
 
     _register_routes(app, paths, routes, logout_page_text)
 
@@ -268,7 +265,6 @@ class _SignIn:
     transaction: SignInTransaction
     refused: Callable[[Request, SignInRefusal], Response]
     keeps_id_token: bool
-    max_sessions: int | None
     ui_language: Callable[[Request], str | None]
 
     def start(self, request: Request, return_to: str | None) -> Response:
@@ -347,13 +343,13 @@ class _SignIn:
             status_code=303,
         )
         try:
-            signed_in = self._open_session(request, answer, config, admitted)
+            signed_in = self._open_the_session_of(request, answer, config, admitted)
         except UsernameTakenSignal:
             return self._refuse(request, AdmissionRefusal.USERNAME_TAKEN)
         _LOGGER.info(_COMPLETED_EVENT, extra={"sub": signed_in.person_id})
         return answer
 
-    def _open_session(
+    def _open_the_session_of(
         self,
         request: Request,
         answer: Response,
@@ -365,7 +361,7 @@ class _SignIn:
             answer,
             config,
             self.transaction,
-            max_sessions=self.max_sessions,
+            max_sessions=_installed_web_auth(request.app).max_sessions,
             name_the_session=_name_the_session_of(admitted, keeps_id_token=self.keeps_id_token),
         )
 
